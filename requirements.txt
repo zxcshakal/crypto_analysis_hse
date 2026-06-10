@@ -1,0 +1,13 @@
+# Внешние зависимости проекта «Криптовалютный аналитик — БИВ253».
+# Всё остальное (tkinter, urllib, http.server, hashlib, pickle, json,
+# secrets, datetime, os, sys, time, shutil) входит в стандартную
+# библиотеку Python и устанавливать через pip не нужно.
+
+pandas>=1.5
+numpy>=1.23
+matplotlib>=3.6
+openpyxl>=3.0
+
+# Примечание: tkinter поставляется вместе с Python, но в Debian/Ubuntu
+# может требовать установки системного пакета:
+#     sudo apt install python3-tk
