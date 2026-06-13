@@ -1,18 +1,5 @@
 ## \file main.py
 #  \brief Главное GUI-приложение «Криптовалютный аналитик» (Tkinter).
-#
-#  Возможности:
-#   * Регистрация при первом запуске / вход по логину и паролю (auth.py).
-#   * Личный кабинет (клик по нику в шапке): профиль, KYC, избранное, аватар.
-#   * Обновление данных из CoinGecko API с офлайн-фолбэком (api_client.py).
-#   * Вкладка новостей с публикацией своих новостей (news_store.py + сервер).
-#   * Тёмная / светлая тема с переключением и лёгкими анимациями.
-#   * Существующие отчёты и графики сохранены без изменения логики.
-#
-#  Используются только стандартная библиотека + pandas/numpy/matplotlib/openpyxl.
-#
-#  \author Хотнянский Кирилл, Прохачев Никита, Фахрутдинов Амир
-#  \date 2026
 
 import os
 import sys
@@ -25,13 +12,43 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 import pandas as pd
 import numpy as np
 import matplotlib
+
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Модули проекта вынесены в подпапку scripts/ — добавляем её в путь поиска.
-if not getattr(sys, "frozen", False):
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+# ==================== КРИТИЧЕСКИ ВАЖНО: ПРАВИЛЬНОЕ ОПРЕДЕЛЕНИЕ ПУТЕЙ ====================
+# Определяем корень проекта (папка, содержащая scripts/ и database/)
+if getattr(sys, "frozen", False):
+    # Если запущено как .exe
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    # Запуск из скрипта: получаем абсолютный путь к main.py
+    MAIN_FILE_PATH = os.path.abspath(__file__)  # .../crypto_analysis_hse/scripts/main.py
+    SCRIPTS_DIR = os.path.dirname(MAIN_FILE_PATH)  # .../crypto_analysis_hse/scripts
+    BASE_DIR = os.path.dirname(SCRIPTS_DIR)  # .../crypto_analysis_hse (корень проекта!)
+
+# Добавляем scripts/ в путь поиска для импорта модулей
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+
+# Теперь все пути строим ОТНОСИТЕЛЬНО BASE_DIR (корня проекта)
+DB_DIR = os.path.join(BASE_DIR, "database")  # Будет: crypto_analysis_hse/database (НЕ scripts/database!)
+AVATAR_DIR = os.path.join(DB_DIR, "avatars")
+CONFIG_PATH = os.path.join(DB_DIR, "config.pkl")
+DB_PATH = os.path.join(DB_DIR, "crypto_database.xlsx")
+NEWS_DB_PATH = os.path.join(DB_DIR, "news_db.xlsx")
+USERS_DB_PATH = os.path.join(DB_DIR, "users_db.xlsx")
+SESSION_PATH = os.path.join(DB_DIR, "session.pkl")
+
+# Создаём папку database ТОЛЬКО в корне проекта, если её нет
+if not os.path.exists(DB_DIR):
+    os.makedirs(DB_DIR, exist_ok=True)
+    print(f"[INFO] Создана папка БД: {DB_DIR}")
+
+os.makedirs(AVATAR_DIR, exist_ok=True)
+
+# Импортируем модули проекта (они в scripts/)
 from data_loader import load_data, build_full_table
 from text_reports import (
     report_simple, report_qualitative_stats,
@@ -39,33 +56,53 @@ from text_reports import (
 )
 from graphic_reports import (
     chart_clustered_bar, chart_categorized_histogram,
-    chart_boxplot, chart_scatter, chart_pie, save_figure,
+    chart_boxplot, chart_scatter, chart_pie, chart_line, save_figure,
 )
 import auth
 import api_client
 import news_store
 
-## Каталоги.
-#  Корень проекта — рядом с main.py (или рядом с .exe в сборке).
-#  Все данные (основная БД, аккаунты, новости, сессия, аватары) — в database/.
-if getattr(sys, "frozen", False):
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_DIR      = os.path.join(BASE_DIR, "database")
-DATA_DIR    = DB_DIR
-AVATAR_DIR  = os.path.join(DB_DIR, "avatars")
-CONFIG_PATH = os.path.join(DB_DIR, "config.pkl")
-DB_PATH     = os.path.join(DB_DIR, "crypto_database.xlsx")
-os.makedirs(DB_DIR, exist_ok=True)
-os.makedirs(AVATAR_DIR, exist_ok=True)
+# Настраиваем пути для модулей (чтобы они тоже использовали database в корне проекта)
+auth.DB_PATH = USERS_DB_PATH
+auth.SESSION_PATH = SESSION_PATH
+news_store.NEWS_DB_PATH = NEWS_DB_PATH
 
-# В .exe база лежит внутри сборки (_MEIPASS). При первом запуске копируем её
-# в database/, чтобы можно было дописывать листы API и работать офлайн.
-if getattr(sys, "frozen", False) and not os.path.exists(DB_PATH):
-    _bundled = os.path.join(getattr(sys, "_MEIPASS", BASE_DIR), "crypto_database.xlsx")
-    if os.path.exists(_bundled):
-        shutil.copy(_bundled, DB_PATH)
+# Проверяем наличие основной базы данных
+if not os.path.exists(DB_PATH):
+    # Пробуем найти в других возможных местах
+    possible_paths = [
+        DB_PATH,
+        os.path.join(BASE_DIR, "crypto_database.xlsx"),  # в корне
+        os.path.join(SCRIPTS_DIR, "crypto_database.xlsx"),  # в scripts (неправильно, но проверим)
+    ]
+
+    found = False
+    for path in possible_paths:
+        if os.path.exists(path):
+            # Если нашли не в правильном месте - копируем
+            if path != DB_PATH:
+                shutil.copy2(path, DB_PATH)
+                print(f"[INFO] База скопирована из {path} в {DB_PATH}")
+            found = True
+            break
+
+    if not found:
+        messagebox.showerror(
+            "Ошибка",
+            f"Файл базы данных не найден!\n\n"
+            f"Ожидаемый путь: {DB_PATH}\n\n"
+            f"Пожалуйста, убедитесь, что файл crypto_database.xlsx\n"
+            f"находится в папке: {BASE_DIR}\\database\\"
+        )
+        sys.exit(1)
+
+# Выводим отладочную информацию (можно убрать после проверки)
+print(f"[DEBUG] BASE_DIR = {BASE_DIR}")
+print(f"[DEBUG] DB_DIR = {DB_DIR}")
+print(f"[DEBUG] DB_PATH = {DB_PATH}")
+print(f"[DEBUG] USERS_DB_PATH = {USERS_DB_PATH}")
+
+# ... (остальной код THEMES, C, QUAL_COLS и т.д. без изменений) ...
 
 ## Тёмная и светлая палитры интерфейса.
 THEMES = {
@@ -85,20 +122,16 @@ THEMES = {
     },
 }
 
-## Активная палитра (мутируется на месте при смене темы, чтобы все ссылки на C
-#  получали актуальные цвета после пересборки интерфейса).
 C = dict(THEMES["dark"])
 
-QUAL_COLS  = ["НАЗВ_КРИПТО", "ТИКЕР", "НАЗВ_КАТ", "НАЗВ_БИРЖИ", "СТРАНА", "АЛГОРИТМ"]
+QUAL_COLS = ["НАЗВ_КРИПТО", "ТИКЕР", "НАЗВ_КАТ", "НАЗВ_БИРЖИ", "СТРАНА", "АЛГОРИТМ"]
 QUANT_COLS = ["ОБЪЕМ_ТОРГОВ", "ЦЕНА_ЗАКРЫТИЯ", "КОЛ_СДЕЛОК", "МАКС_ЦЕНА", "МИН_ЦЕНА", "ЦЕНА_ОТКРЫТИЯ"]
-AGG_OPTS   = ["mean", "sum", "count", "max", "min"]
+AGG_OPTS = ["mean", "sum", "count", "max", "min"]
 
-SAVE_FORMATS_TEXT  = [("Excel", "*.xlsx"), ("CSV", "*.csv"), ("Текст (TSV)", "*.txt")]
+SAVE_FORMATS_TEXT = [("Excel", "*.xlsx"), ("CSV", "*.csv"), ("Текст (TSV)", "*.txt")]
 SAVE_FORMATS_IMAGE = [("PNG", "*.png"), ("JPEG", "*.jpg"), ("PDF", "*.pdf"), ("SVG", "*.svg")]
 
 
-## \brief Прочитать конфиг приложения (тема, адрес сервера).
-#  \return Словарь конфигурации.
 def load_config() -> dict:
     if os.path.exists(CONFIG_PATH):
         try:
@@ -109,13 +142,9 @@ def load_config() -> dict:
     return {"theme": "dark", "server_url": ""}
 
 
-## \brief Сохранить конфиг приложения.
-#  \param cfg Словарь конфигурации.
-#  \return None
 def save_config(cfg: dict) -> None:
     with open(CONFIG_PATH, "wb") as f:
         pickle.dump(cfg, f)
-
 
 ## \class App
 #  \brief Корневое окно: управляет экраном входа и главным интерфейсом.
@@ -251,9 +280,9 @@ class App(tk.Tk):
                  fg=C["subtext"], bg=C["bg2"]).pack(pady=(0, 18))
 
         self.auth_login = tk.StringVar()
-        self.auth_pass  = tk.StringVar()
-        self.auth_fio   = tk.StringVar()
-        self.auth_mode  = "register" if first else "login"
+        self.auth_pass = tk.StringVar()
+        self.auth_fio = tk.StringVar()
+        self.auth_mode = "register" if first else "login"
 
         def field(label, var, show=None):
             tk.Label(card, text=label, fg=C["text"], bg=C["bg2"],
@@ -336,7 +365,7 @@ class App(tk.Tk):
     #  \return None
     def _submit_auth(self):
         login = self.auth_login.get().strip()
-        pwd   = self.auth_pass.get()
+        pwd = self.auth_pass.get()
         if self.auth_mode == "register":
             ok, msg = auth.register(login, pwd, self.auth_fio.get())
             if not ok:
@@ -412,16 +441,17 @@ class App(tk.Tk):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
         tabs = {
-            "tab_data":   ("Данные / API",        self._build_tab_data),
-            "tab_news":   ("Новости",             self._build_tab_news),
-            "tab_r1":     ("Торговый отчёт",      self._build_tab_r1),
-            "tab_r2":     ("Статистика",          self._build_tab_r2),
-            "tab_r3":     ("Сводная таблица",     self._build_tab_r3),
-            "tab_g_bar":  ("Столбчатая",          self._build_tab_bar),
-            "tab_g_hist": ("Гистограмма",         self._build_tab_hist),
-            "tab_g_box":  ("Бокса-Вискера",       self._build_tab_box),
-            "tab_g_sct":  ("Рассеивание",         self._build_tab_scatter),
-            "tab_g_pie":  ("Круговая",            self._build_tab_pie),
+            "tab_data": ("Данные / API", self._build_tab_data),
+            "tab_news": ("Новости", self._build_tab_news),
+            "tab_r1": ("Торговый отчёт", self._build_tab_r1),
+            "tab_r2": ("Статистика", self._build_tab_r2),
+            "tab_r3": ("Сводная таблица", self._build_tab_r3),
+            "tab_g_bar": ("Столбчатая", self._build_tab_bar),
+            "tab_g_hist": ("Гистограмма", self._build_tab_hist),
+            "tab_g_box": ("Бокса-Вискера", self._build_tab_box),
+            "tab_g_sct": ("Рассеивание", self._build_tab_scatter),
+            "tab_g_pie": ("Круговая", self._build_tab_pie),
+            "tab_g_line": ("Линейный", self._build_tab_line),
         }
         for attr, (label, builder) in tabs.items():
             frame = tk.Frame(nb, bg=C["bg"])
@@ -793,7 +823,7 @@ class App(tk.Tk):
     def _build_tab_r1(self, f):
         self._section_title(f, "Отчёт 1 — Торговые данные (проекция + фильтр)")
         panel = self._param_panel(f, "Параметры фильтрации"); panel.pack(fill="x", padx=12, pady=4)
-        tickers   = ["Все"] + sorted(self.data["cryptos"]["ТИКЕР"].tolist())
+        tickers = ["Все"] + sorted(self.data["cryptos"]["ТИКЕР"].tolist())
         exchanges = ["Все"] + sorted(self.data["exchanges"]["НАЗВ_БИРЖИ"].tolist())
         self.r1_ticker = tk.StringVar(value="Все"); self.r1_exchange = tk.StringVar(value="Все")
         self.r1_from = tk.StringVar(value="2026-01-01"); self.r1_to = tk.StringVar(value="2026-01-31")
@@ -999,6 +1029,77 @@ class App(tk.Tk):
         fig = chart_pie(self.data, qual_col=self.pie_qual.get(), value_col=self.pie_val.get(),
                         aggfunc=self.pie_agg.get(), top_n=self.pie_topn.get())
         self.pie_fig = fig; self._show_figure(fig, self.pie_frame)
+
+    def _build_tab_line(self, f):
+        """Построить вкладку линейного графика."""
+        self._section_title(f, "График 6 — Линейный график динамики")
+
+        panel = self._param_panel(f, "Параметры")
+        panel.pack(fill="x", padx=12, pady=2)
+
+        # Выборы для графика
+        self.line_date = tk.StringVar(value="ДАТА")
+        self.line_value = tk.StringVar(value="ЦЕНА_ЗАКРЫТИЯ")
+        self.line_group = tk.StringVar(value="ТИКЕР")
+        self.line_agg = tk.StringVar(value="mean")
+
+        # Доступные колонки
+        date_cols = ["ДАТА"]
+        value_cols = QUANT_COLS
+        group_cols = ["ТИКЕР", "НАЗВ_КРИПТО", "НАЗВ_КАТ", "НАЗВ_БИРЖИ", "СТРАНА", "АЛГОРИТМ"]
+
+        # Добавляем выбор даты (фиксировано, но можно расширить)
+        r1 = tk.Frame(panel, bg=C["bg"]);
+        r1.pack(fill="x", pady=2)
+        self._lbl(r1, "Колонка даты:", width=20, anchor="w").pack(side="left")
+        self._combo(r1, self.line_date, date_cols, width=20).pack(side="left", padx=4)
+
+        # Выбор значения (Y)
+        r2 = tk.Frame(panel, bg=C["bg"]);
+        r2.pack(fill="x", pady=2)
+        self._lbl(r2, "Значение (Y):", width=20, anchor="w").pack(side="left")
+        self._combo(r2, self.line_value, value_cols, width=20).pack(side="left", padx=4)
+
+        # Выбор группировки (линии)
+        r3 = tk.Frame(panel, bg=C["bg"]);
+        r3.pack(fill="x", pady=2)
+        self._lbl(r3, "Группировка (линии):", width=20, anchor="w").pack(side="left")
+        self._combo(r3, self.line_group, group_cols, width=20).pack(side="left", padx=4)
+
+        # Выбор агрегации
+        r4 = tk.Frame(panel, bg=C["bg"]);
+        r4.pack(fill="x", pady=2)
+        self._lbl(r4, "Агрегация:", width=20, anchor="w").pack(side="left")
+        self._combo(r4, self.line_agg, AGG_OPTS, width=10).pack(side="left", padx=4)
+
+        # Кнопки
+        self.line_fig = None
+        self._btn_row(f, [
+            ("Построить", self._draw_line, C["green"]),
+            ("Сохранить граф", lambda: self._save_fig_dialog(self.line_fig), C["red"])
+        ])
+
+        # Область для графика
+        self.line_frame = tk.Frame(f, bg=C["bg"])
+        self.line_frame.pack(fill="both", expand=True, padx=8, pady=4)
+
+        # Строим график по умолчанию
+        self._draw_line()
+
+    def _draw_line(self):
+        """Построить линейный график."""
+        try:
+            fig = chart_line(
+                self.data,
+                date_col=self.line_date.get(),
+                value_col=self.line_value.get(),
+                group_col=self.line_group.get(),
+                aggfunc=self.line_agg.get()
+            )
+            self.line_fig = fig
+            self._show_figure(fig, self.line_frame)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось построить график:\n{str(e)}")
 
 
 if __name__ == "__main__":

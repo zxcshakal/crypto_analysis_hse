@@ -37,6 +37,61 @@ plt.rcParams.update({
 })
 
 
+## \brief Линейный график динамики показателя во времени.
+#  \param data Словарь справочников.
+#  \param date_col Колонка с датой (по умолчанию "ДАТА").
+#  \param value_col Количественный атрибут для отображения.
+#  \param group_col Качественный атрибут для группировки (разные линии).
+#  \param aggfunc Функция агрегации для группировки по датам.
+#  \return Фигура matplotlib.
+def chart_line(
+        data: dict,
+        date_col: str = "ДАТА",
+        value_col: str = "ЦЕНА_ЗАКРЫТИЯ",
+        group_col: str = "ТИКЕР",
+        aggfunc: str = "mean",
+) -> plt.Figure:
+    df = build_full_table(data)
+
+    # Группируем по дате и группе, агрегируем значения
+    grouped = df.groupby([date_col, group_col])[value_col].agg(aggfunc).reset_index()
+
+    # Сортируем по дате
+    grouped[date_col] = pd.to_datetime(grouped[date_col])
+    grouped = grouped.sort_values(date_col)
+
+    # Получаем уникальные группы (линии)
+    groups = grouped[group_col].unique()
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    _style_ax(ax, fig)
+
+    for i, grp in enumerate(groups):
+        subset = grouped[grouped[group_col] == grp]
+        ax.plot(subset[date_col], subset[value_col],
+                marker='o', linewidth=2, markersize=4,
+                color=COLORS[i % len(COLORS)],
+                label=str(grp), alpha=0.85)
+
+    ax.set_xlabel("Дата")
+    ax.set_ylabel(f"{aggfunc.capitalize()}({value_col})")
+    ax.set_title(f"Динамика «{value_col}» по датам (в разрезе «{group_col}»)")
+    ax.legend(title=group_col, bbox_to_anchor=(1.01, 1), loc="upper left",
+              facecolor=BG_AXES, labelcolor=FG_TEXT,
+              title_fontsize=8, fontsize=8)
+
+    # Форматирование оси Y
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:,.0f}"))
+
+    # Поворот подписей дат для лучшей читаемости
+    plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
+    # Добавляем сетку для удобства чтения
+    ax.grid(True, alpha=0.3, color=FG_SPINE, linestyle='--')
+
+    fig.tight_layout()
+    return fig
+
 ## \brief Применить единое тёмное оформление к осям.
 #  \param ax Объект осей matplotlib.
 #  \param fig Фигура matplotlib.

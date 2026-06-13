@@ -3,10 +3,10 @@
 #
 #  Запускается на «домашнем ПК-сервере». Хранит общие новости в Excel
 #  (server_news.xlsx) и отдаёт их всем клиентам:
-#    * GET  /news  → JSON-список всех новостей;
-#    * POST /news  → добавить новость (тело — JSON одной записи).
+#    * GET/news→ JSON-список всех новостей;
+#    * POST/news→ добавить новость (тело — JSON одной записи).
 #
-#  Запуск:  python news_server.py 8765
+#  Запуск:python news_server.py 8765
 #  Чтобы новости «расходились ко всем», на роутере нужно пробросить этот порт
 #  и сообщить клиентам ваш внешний IP (в news_store.SERVER_URL).
 #
@@ -21,18 +21,33 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pandas as pd
 
-## Файл общей базы новостей на сервере (в папке database/).
+## Определяем корень проекта (папка, содержащая scripts/ и database/)
 if getattr(sys, "frozen", False):
+    # Если запущено как .exe
     _ROOT = os.path.dirname(sys.executable)
 else:
-    _ROOT = os.path.dirname(os.path.abspath(__file__))
+    # news_server.py находится в crypto_analysis_hse/scripts/
+    # Поднимаемся на один уровень вверх, чтобы получить корень проекта
+    _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # .../crypto_analysis_hse/scripts
+    _ROOT = os.path.dirname(_SCRIPT_DIR)  # .../crypto_analysis_hse (корень проекта!)
+
+## Папка database находится на уровне корня проекта
 _DB_DIR = os.path.join(_ROOT, "database")
 os.makedirs(_DB_DIR, exist_ok=True)
+
+## Файл общей базы новостей на сервере
 SERVER_DB = os.path.join(_DB_DIR, "server_news.xlsx")
-## Имя листа.
+
+## Имя листа
 SHEET = "НОВОСТИ"
-## Колонки.
+
+## Колонки
 COLUMNS = ["ID", "АВТОР", "ЗАГОЛОВОК", "ТЕКСТ", "ДАТА"]
+
+# Отладочный вывод (можно убрать после проверки)
+print(f"[DEBUG] news_server.py - ROOT = {_ROOT}")
+print(f"[DEBUG] news_server.py - DB_DIR = {_DB_DIR}")
+print(f"[DEBUG] news_server.py - SERVER_DB = {SERVER_DB}")
 
 
 ## \brief Прочитать серверную базу новостей.
@@ -108,6 +123,7 @@ class NewsHandler(BaseHTTPRequestHandler):
 def run(port: int = 8765) -> None:
     server = ThreadingHTTPServer(("0.0.0.0", port), NewsHandler)
     print(f"Сервер новостей запущен на порту {port}. Ctrl+C — остановить.")
+    print(f"База новостей: {SERVER_DB}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
